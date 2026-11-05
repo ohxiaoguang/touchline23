@@ -50,12 +50,11 @@ import Foundation
         let mac = LauncherModel([haptics, rumble], defaults: d2)
         assert(!mac.settings.contains { $0.env == "DM_TOUCH_HAPTICS" })
         assert(mac.settings.contains { $0.env == "DM_RUMBLE" })
-        let mouse = mac.settings.first { $0.env == "DM_MOUSE_HID" }!
-        assert(mac.values[mouse.env] == "0")
-        mac.set(mouse, "1")
-        let restoredMouse = LauncherModel([], defaults: d2)
-        assert(restoredMouse.values[mouse.env] == "1")
-        assert(restoredMouse.settings.filter { $0.env == "DM_MOUSE_HID" }.count == 1)
+        // The experimental Mouse HID switch is not drawn either: the host still reads DM_MOUSE_HID and it stays off
+        // unless the player sets it themselves, and a row naming it is filtered out like haptics.
+        assert(!mac.settings.contains { $0.env == "DM_MOUSE_HID" })
+        let mouse = LauncherModel([Setting(env: "DM_MOUSE_HID", kind: "toggle", label: "Mouse HID", note: "", def: "1", options: nil, min: nil, max: nil, step: nil)], defaults: d2)
+        assert(mouse.settings.filter { $0.env == "DM_MOUSE_HID" }.isEmpty)
         #endif
         // The meta columns dm/games/settings.py writes, decoded from a launcher.json exactly as the packagers write it.
         // SHOW_FPS (not basic) is listed before OPMODE (basic) inside "Game" so the basic-first order is really tested.
@@ -100,7 +99,7 @@ import Foundation
         // Headings, and a sub-setting drawn only while the row it needs has that value.
         let grouped = LauncherModel(rows, defaults: d3)
         // The profile's headings come first, in settings.tsv's order; the switches the launcher adds itself carry no
-        // section and keep their own group at the end (DM_MOUSE_HID here, the touch switches on iOS).
+        // section and keep their own group at the end (the touch switches on iOS; a Mac launcher adds none).
         assert(grouped.sections.prefix(3).map { $0.title } == ["Performance", "Controls", "Game"])
         assert(grouped.sections.dropFirst(3).allSatisfy { $0.title == nil })
         func group(_ title: String) -> [String] {

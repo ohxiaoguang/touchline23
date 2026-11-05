@@ -62,10 +62,11 @@ final class LauncherModel: ObservableObject {
         #endif
         #if os(macOS)
         // Touch feedback is the virtual gamepad's haptic click (dm/ios/Sources/DmGamepad.m is its only reader), so a
-        // Mac launcher must not offer it even when a profile's settings name it. The three switches above are added
-        // under #if os(iOS) and never reach this list. Game rumble (DM_RUMBLE) stays: a controller on a Mac rumbles.
-        let settings = settings.filter { $0.env != "DM_TOUCH_HAPTICS" && $0.env != "DM_MOUSE_HID" } + [
-            Setting(env: "DM_MOUSE_HID", kind: "toggle", label: "Enable native Mouse HID (experimental)", note: "Keeps left-button touch emulation. The game must read Switch Mouse HID; this does not add a game-specific pointer bridge.", def: "0", options: nil, min: nil, max: nil, step: nil)]
+        // Mac launcher must not offer it even when a profile's settings name it; the same goes for the experimental
+        // Mouse HID switch, which stays off unless the player sets DM_MOUSE_HID themselves (dm_input.h, hle_hid.c read
+        // it and left-button touch emulation does not depend on either). The three switches above are added under
+        // #if os(iOS) and never reach this list. Game rumble (DM_RUMBLE) stays: a controller on a Mac rumbles.
+        let settings = settings.filter { $0.env != "DM_TOUCH_HAPTICS" && $0.env != "DM_MOUSE_HID" }
         #endif
         self.settings = settings
         fromFile = Set((ProcessInfo.processInfo.environment["DM_ENV_FILE_KEYS"] ?? "").split(separator: " ").map(String.init))
