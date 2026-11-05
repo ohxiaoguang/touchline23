@@ -84,6 +84,14 @@ Outputs: `Release/Touchline23.app` and `Release/Touchline23.ipa`. These wrappers
 build external-resource artifacts. Work defaults to ignored `build/work`; keep
 private game inputs, keys and extraction/analysis work on the game drive.
 
+The macOS App is not signed: ad-hoc signing is opt-in with `--sign` (or
+`--sign "<identity>"` to sign with that identity), which seals `Info.plist` and
+every resource. Unsigned builds run normally. Game Mode is asked for by the App's
+`Info.plist` (`LSApplicationCategoryType` and `LSSupportsGameMode`), not by the
+signature. A Directory App carries the whole RomFS (about 14.8 GB for this game),
+so macOS verifies the bundle when it is first opened and that first launch takes
+noticeably longer than the ones after it.
+
 Reuse existing work when rebuilding the host or launcher:
 
 | Prepared input | Option |

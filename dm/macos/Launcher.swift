@@ -382,7 +382,7 @@ private struct MacLauncher: View {
                         }
                     }
                 }
-                ForEach(settings.settings) { SettingRow(s: $0, m: settings).disabled(resources.running) }
+                SettingsList(m: settings).disabled(resources.running)
                 LauncherLanguageRow()
                 Section(l("Storage location")) {
                     HStack {

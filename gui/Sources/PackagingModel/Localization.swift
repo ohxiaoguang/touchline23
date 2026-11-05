@@ -204,6 +204,8 @@ public struct GUIText: ExpressibleByStringLiteral, ExpressibleByStringInterpolat
         "Confirm Packaging": "确认开始打包？",
         "Start Packaging": "开始打包",
         "Game": "游戏",
+        "Controls": "操控",
+        "Performance": "性能",
         "Game version": "游戏版本",
         "Build targets": "构建目标",
         "Shader status": "Shader 状态",

@@ -41,10 +41,7 @@ IOS_IPA_NAME = 'Touchline23.ipa'
 # assets/app-icon/make_icon.swift draws them (iOS wants an opaque square and
 # rounds it itself; macOS shows a rounded icon with clear corners).
 PROJECT_ICON = ROOT / 'assets/app-icon/touchline23.png'
-# The Mac app follows the nxnative convention of showing the game's own icon: fifa23.png is the
-# 256x256 control-data icon nx_extract saves as icon.jpg, upscaled. Falls back to the project artwork.
-GAME_MAC_ICON = ROOT / 'assets/app-icon/fifa23.png'
-PROJECT_MAC_ICON = GAME_MAC_ICON if GAME_MAC_ICON.is_file() else ROOT / 'assets/app-icon/touchline23-mac.png'
+PROJECT_MAC_ICON = ROOT / 'assets/app-icon/touchline23-mac.png'
 # Game data and private key material must never end up inside an artifact.
 FORBIDDEN = ('.nsp', '.xci', '.nsz', '.ncz', '.xcz', '.nca', '.keys', '.tik')
 
@@ -269,12 +266,50 @@ def modules_ready(directory, names):
                for n in names)
 
 
+def module_build_id(patched, name):
+    """The NSO build ID of one rewritten module, as patch_nso.py recorded it (# BUILD_ID in its fixups table).
+
+    The rewriter reads it from the module's own header, so this is the module's identity and not its file name.
+    """
+    table = Path(patched) / (name + '.fixups.tsv')
+    if not table.is_file():
+        return None
+    found = re.search(r'^# BUILD_ID\t([0-9a-fA-F]{32})$', table.read_text(errors='replace'), re.M)
+    return found[1].lower() if found else None
+
+
+def check_module_builds(patched, names, g):
+    """Refuse a reused module directory that is not this game's, at a build this profile declares.
+
+    Everything keyed on a build ID depends on it being right: the rewriter's fixed addresses and observation gates
+    (the profile's patches.py, dm/tools/sdk_patches.py), nn::oe::GetDisplayVersion's build row, and the host's own
+    module_t.build_id checks. A directory left over from another build would run those against code they were not
+    found in, so the build stops here instead. The ID is read from the rewriter's table, never from a file name.
+    """
+    declared = {name: {b[name] for b in g.builds().values() if name in b} for name in names}
+    for name in names:
+        got = module_build_id(patched, name)
+        if not got:
+            raise Failure('%s/%s.fixups.tsv has no "# BUILD_ID" line: only a directory patch_nso.py wrote can be '
+                          'reused, because its build ID is what this build is checked against' % (patched, name))
+        known = declared[name]
+        if not known:
+            continue   # the profile declares no build row for this module: nothing to compare against
+        if got not in known:
+            raise Failure('--patched %s: %s is build %s, which %s does not declare (it has %s): rewrite the modules '
+                          'from this game\'s own ExeFS, or pass the directory a working build of this version used'
+                          % (patched, name, got, g.id, ', '.join(sorted(known))))
+        say('%s build id' % name, got, '(declared)')
+    return True
+
+
 def rewrite(args, exefs, work, g):
     names = list(g.words('modules'))
     if args.patched:
         patched = Path(args.patched)
         if not modules_ready(patched, names):
             raise Failure('--patched %s has no rewritten %s' % (patched, ', '.join(names)))
+        check_module_builds(patched, names, g)
         say('patched modules:', ', '.join(names), '(as given)')
         return patched
     if exefs is None:
@@ -459,7 +494,8 @@ def app_version(args, nacp):
 
 
 def build_mac(args, work, patched, library, nacp, icon, version, bundle, romfs=None):
-    need_tools(['swiftc', 'sips', 'codesign'], 'building the macOS App')
+    # codesign is only needed when the App is asked to be signed (--sign); every other step works without it.
+    need_tools(['swiftc', 'sips'] + (['codesign'] if args.sign is not None else []), 'building the macOS App')
     out = Path(args.out) if args.out else ROOT / 'Release' / MAC_APP_NAME
     out = out.resolve()
     if out.exists():
@@ -482,7 +518,9 @@ def build_mac(args, work, patched, library, nacp, icon, version, bundle, romfs=N
         argv += ['--romfs', str(romfs)]
     if icon:
         argv += ['--icon', str(icon)]
-    say('packaging', out.name)
+    if args.sign is not None:
+        argv += ['--sign', args.sign]
+    say('packaging', out.name, '(ad-hoc signed)' if args.sign is not None else '(unsigned)')
     run(argv, 'build_mac_app.py')
     return out
 
@@ -563,6 +601,8 @@ def parse_args(argv):
                         'launcher asks for nothing')
     p.add_argument('--romfs', type=Path,
                    help='directory mode: an already extracted RomFS to bundle (skips extracting it again)')
+    p.add_argument('--sign', nargs='?', const='-', metavar='IDENTITY',
+                   help='macOS: ad-hoc sign the finished App (codesign --sign -, or with IDENTITY); off unless given')
     p.add_argument('--icon', type=Path, help='App icon (default assets/app-icon/touchline23.png)')
     p.add_argument('--standard-font', type=Path, help='Unicode TTF stand-in for the system font')
     p.add_argument('--font-python', default=sys.executable,

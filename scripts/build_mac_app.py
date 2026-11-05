@@ -155,7 +155,7 @@ def copy_tree(src, dst):
 
 
 def strip_detritus(app):
-    """The "._name" files a copy from an exFAT volume leaves: codesign reads each one as a
+    """The "._name" files a copy from an exFAT volume leaves: junk in any bundle, and codesign reads each one as a
     code object that is not signed and refuses the whole bundle."""
     for parent, _, files in os.walk(app):
         for n in files:
@@ -165,15 +165,13 @@ def strip_detritus(app):
 
 
 def sign(app, identity='-'):
-    """Ad-hoc sign the App: the inner host first, then the bundle, so that Info.plist and
-    every resource are sealed.
+    """Ad-hoc sign the App: the inner host first, then the bundle, so that Info.plist and every resource are sealed.
 
-    An unsigned build keeps only the signature the linker gave launch and dmhost, which
-    seals no resources and does not bind Info.plist; such an App is not a signed game to
-    LaunchServices, and macOS grants Game Mode only to a game that is signed, full screen
-    and frontmost. With the category key alone the App ran full screen and never entered
-    Game Mode (Touchline23, 2026-11-04); the previous App of this game, and every nxnative
-    App (dm/mac/pack_app.py: sign), carry the bundle signature.
+    Optional on purpose (--sign), and off by default. An unsigned App keeps only the signature the linker gave launch
+    and dmhost; that is a normal App for every purpose this project needs, and it is what every build before this
+    option produced. Game Mode's documented requirements are the two Info.plist keys (LSApplicationCategoryType and
+    LSSupportsGameMode); no Apple document makes a bundle signature one of them, and this repository has no
+    measurement that isolates it, so a build is not signed unless the caller asks.
     """
     strip_detritus(app)
     for target in (app / 'Contents/MacOS/dmhost', app):
@@ -312,9 +310,12 @@ def package(a, launcher=None):
         plistlib.dump(plist, f)
     (res/'Readme.txt').write_text(readme(backend, a.title_id))
     audit(a.output, backend, marker, a.shaders.name if stamp.is_file() else None, layer)
-    sign(a.output)   # after audit: the audit refuses a _CodeSignature directory of its own
+    # --sign is the only reason a bundle is signed. It runs after the audit, which refuses a _CodeSignature of its own.
+    identity = getattr(a, 'sign', None)
+    if identity is not None: sign(a.output, identity)
+    else: strip_detritus(a.output)   # an exFAT source leaves ._ files in any bundle, signed or not
     return {'backend': backend, 'programs': len(programs), 'shader_files': len(shaders),
-            'shader_stamp': stamp.is_file(), 'gfx': layer or 'nvn',
+            'shader_stamp': stamp.is_file(), 'gfx': layer or 'nvn', 'signed': identity is not None,
             'romfs_bundled': backend == 'directory', 'addon_content_bundled': bool(aoc), 'containers_or_keys_bundled': False}
 
 
@@ -326,6 +327,9 @@ def main(argv=None):
                     help='directory: bundle --romfs in the App; nsp: read an external container at run time (default: nsp, '
                          'or directory when --romfs is given)')
     ap.add_argument('--romfs', type=Path, help='directory mode: the game RomFS folder to bundle')
+    ap.add_argument('--sign', nargs='?', const='-', metavar='IDENTITY',
+                    help='ad-hoc sign the finished App (codesign --sign -, an IDENTITY signs with that identity instead); '
+                         'off unless given. Game Mode is asked for by the two Info.plist keys, not by a signature')
     ap.add_argument('--aoc', type=Path, help='directory mode: verified AOC tree with manifest.json')
     ap.add_argument('--chain-header', type=Path,
                     help='the chain version header the host was built with (default: dm/gfx/nvn/dmsh_chain.h in this source tree)')
@@ -368,7 +372,8 @@ def main(argv=None):
     except (OSError,ValueError) as exc: ap.error(str(exc))
     print(f'App: {a.output}; {summary["programs"]} prepared modules; {summary["shader_files"]} Shader files ({summary["gfx"]}); '
           f'backend {summary["backend"]}; ' + ('game RomFS bundled' if summary['romfs_bundled'] else 'no game containers or keys')
-          + ('; add-on content bundled' if summary['addon_content_bundled'] else ''))
+          + ('; add-on content bundled' if summary['addon_content_bundled'] else '')
+          + ('; ad-hoc signed' if summary['signed'] else '; unsigned'))
 
 
 if __name__ == '__main__': main()

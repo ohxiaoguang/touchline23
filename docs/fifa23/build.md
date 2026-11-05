@@ -21,7 +21,15 @@ by pointing at what an earlier run produced (`--exefs`, `--patched`,
 `--shaders`, `--ios-shaders`, `--shader-pack`), and `--work` names the work
 directory (default `build/work`, which Git ignores). The script refuses a Shader
 library whose `inputs.tsv` names other inputs, so a stale or foreign library is
-an error rather than a silent link.
+an error rather than a silent link. It refuses a reused `--patched` directory in
+the same way: the build ID `patch_nso.py` recorded in each module's fixups table
+has to be one the profile's `build` rows declare, because the rewriter's fixed
+addresses, the observation gates and `nn::oe::GetDisplayVersion` all key on it.
+
+The macOS App is unsigned. `--sign` ad-hoc signs it (`--sign "<identity>"` signs
+with that identity), sealing `Info.plist` and every resource; nothing about the
+App's behaviour depends on it, and Game Mode is asked for by the two `Info.plist`
+keys `LSApplicationCategoryType` and `LSSupportsGameMode`.
 
 A Git checkout and a downloaded source archive build the same way: nothing in the
 build reads `.git`, so a release ZIP is enough beside the game inputs.
