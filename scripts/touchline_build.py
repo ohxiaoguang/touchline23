@@ -232,9 +232,14 @@ def extract(args, work):
         raise Failure('--keys <prod.keys> is required to read the game containers')
     out = work / 'extract'
     binary = find_extractor(args, work)
-    say('extracting ExeFS and control data (no RomFS)', Path(args.base).name)
+    bundled = getattr(args, 'resource_backend', 'nsp') == 'directory' and args.target == 'mac'
+    say('extracting ExeFS, control data and the RomFS (bundled App)' if bundled
+        else 'extracting ExeFS and control data (no RomFS)', Path(args.base).name)
     out.mkdir(parents=True, exist_ok=True)
-    argv = [binary, args.keys, args.base, args.update or '-', out, '--program-only']
+    argv = [binary, args.keys, args.base, args.update or '-', out]
+    if not bundled:
+        # External-resource App: never enumerate the multi-gigabyte data section.
+        argv.append('--program-only')
     run(argv, 'nx_extract', env=tool_env())
     exefs = out / 'ExeFS'
     if not exefs.is_dir():
@@ -261,12 +266,50 @@ def modules_ready(directory, names):
                for n in names)
 
 
+def module_build_id(patched, name):
+    """The NSO build ID of one rewritten module, as patch_nso.py recorded it (# BUILD_ID in its fixups table).
+
+    The rewriter reads it from the module's own header, so this is the module's identity and not its file name.
+    """
+    table = Path(patched) / (name + '.fixups.tsv')
+    if not table.is_file():
+        return None
+    found = re.search(r'^# BUILD_ID\t([0-9a-fA-F]{32})$', table.read_text(errors='replace'), re.M)
+    return found[1].lower() if found else None
+
+
+def check_module_builds(patched, names, g):
+    """Refuse a reused module directory that is not this game's, at a build this profile declares.
+
+    Everything keyed on a build ID depends on it being right: the rewriter's fixed addresses and observation gates
+    (the profile's patches.py, dm/tools/sdk_patches.py), nn::oe::GetDisplayVersion's build row, and the host's own
+    module_t.build_id checks. A directory left over from another build would run those against code they were not
+    found in, so the build stops here instead. The ID is read from the rewriter's table, never from a file name.
+    """
+    declared = {name: {b[name] for b in g.builds().values() if name in b} for name in names}
+    for name in names:
+        got = module_build_id(patched, name)
+        if not got:
+            raise Failure('%s/%s.fixups.tsv has no "# BUILD_ID" line: only a directory patch_nso.py wrote can be '
+                          'reused, because its build ID is what this build is checked against' % (patched, name))
+        known = declared[name]
+        if not known:
+            continue   # the profile declares no build row for this module: nothing to compare against
+        if got not in known:
+            raise Failure('--patched %s: %s is build %s, which %s does not declare (it has %s): rewrite the modules '
+                          'from this game\'s own ExeFS, or pass the directory a working build of this version used'
+                          % (patched, name, got, g.id, ', '.join(sorted(known))))
+        say('%s build id' % name, got, '(declared)')
+    return True
+
+
 def rewrite(args, exefs, work, g):
     names = list(g.words('modules'))
     if args.patched:
         patched = Path(args.patched)
         if not modules_ready(patched, names):
             raise Failure('--patched %s has no rewritten %s' % (patched, ', '.join(names)))
+        check_module_builds(patched, names, g)
         say('patched modules:', ', '.join(names), '(as given)')
         return patched
     if exefs is None:
@@ -429,7 +472,8 @@ def launcher_settings(work, patched, nacp, args, environment):
     if nacp is None:
         say('no control.nacp: the launcher will not offer the game languages')
     env = dict(environment, DM_SHOW_FPS='YES' if args.show_fps == 1 else 'NO',
-               DM_LANG=args.language or 'en-US')
+               DM_LANG=args.language or 'en-US',
+               SETTINGS_PLATFORM=args.target)   # mac: the settings window gains Display mode; ios: Picture / Frame-rate counter
     text = run([sys.executable, ROOT / 'dm/games/settings.py', GAME_ID, patched,
                 nacp or Path('/nonexistent/control.nacp'), out], 'dm/games/settings.py', env=env, quiet=True)
     say('launcher settings:', (text or '').strip())
@@ -449,8 +493,9 @@ def app_version(args, nacp):
     return '1.0'
 
 
-def build_mac(args, work, patched, library, nacp, icon, version, bundle):
-    need_tools(['swiftc', 'sips', 'codesign'], 'building the macOS App')
+def build_mac(args, work, patched, library, nacp, icon, version, bundle, romfs=None):
+    # codesign is only needed when the App is asked to be signed (--sign); every other step works without it.
+    need_tools(['swiftc', 'sips'] + (['codesign'] if args.sign is not None else []), 'building the macOS App')
     out = Path(args.out) if args.out else ROOT / 'Release' / MAC_APP_NAME
     out = out.resolve()
     if out.exists():
@@ -459,15 +504,23 @@ def build_mac(args, work, patched, library, nacp, icon, version, bundle):
         say('replacing the previous', out.name)
         shutil.rmtree(out)
     out.parent.mkdir(parents=True, exist_ok=True)
+    backend = getattr(args, 'resource_backend', 'nsp')
     argv = [sys.executable, ROOT / 'scripts/build_mac_app.py',
             '--host', work / 'dmhost', '--patched', patched, '--shaders', library,
             '--profile', work / 'profile' / GAME_ID, '--font', fonts(work, args),
             '--settings', work / 'launcher.json', '--title-id', GAME_ID,
             '--name', args.app_name, '--version', version, '--bundle-id', bundle,
-            '--resource-backend', 'nsp', '--output', out]
+            '--resource-backend', backend, '--output', out]
+    if backend == 'directory':
+        if not romfs:
+            raise Failure('directory mode needs the game RomFS: pass --romfs or let the extract stage write it')
+        say('bundling the game RomFS into the App:', romfs)
+        argv += ['--romfs', str(romfs)]
     if icon:
         argv += ['--icon', str(icon)]
-    say('packaging', out.name)
+    if args.sign is not None:
+        argv += ['--sign', args.sign]
+    say('packaging', out.name, '(ad-hoc signed)' if args.sign is not None else '(unsigned)')
     run(argv, 'build_mac_app.py')
     return out
 
@@ -542,6 +595,14 @@ def parse_args(argv):
     p.add_argument('--version', help="App version (default: the game's display version)")
     p.add_argument('--language', help='default game language (default en-US)')
     p.add_argument('--show-fps', type=int, choices=(0, 1), help='start with the frame-rate counter on')
+    p.add_argument('--resource-backend', choices=('nsp', 'directory'), default='nsp',
+                   help='nsp: the App carries no game data and the launcher asks for the containers at run time; '
+                        'directory: the game RomFS is bundled in the App (Contents/Resources/romfs) and the '
+                        'launcher asks for nothing')
+    p.add_argument('--romfs', type=Path,
+                   help='directory mode: an already extracted RomFS to bundle (skips extracting it again)')
+    p.add_argument('--sign', nargs='?', const='-', metavar='IDENTITY',
+                   help='macOS: ad-hoc sign the finished App (codesign --sign -, or with IDENTITY); off unless given')
     p.add_argument('--icon', type=Path, help='App icon (default assets/app-icon/touchline23.png)')
     p.add_argument('--standard-font', type=Path, help='Unicode TTF stand-in for the system font')
     p.add_argument('--font-python', default=sys.executable,
@@ -567,6 +628,18 @@ def main(argv=None):
     # (App name, version, languages); a reuse of both may go without it.
     exefs = extract(args, work) if (args.exefs or args.base) else None
     patched = rewrite(args, exefs, work, g)
+
+    # A bundled App reads the game from Contents/Resources/romfs: the launcher asks for nothing.
+    romfs = None
+    if args.target == 'mac' and args.resource_backend == 'directory':
+        romfs = (args.romfs or (work / 'extract' / 'RomFS')).resolve()
+        marker = g.get('romfs_marker')
+        if not romfs.is_dir():
+            raise Failure('directory mode needs the game RomFS, but %s does not exist: drop --exefs so the '
+                          'extract stage writes it, or pass --romfs <extracted RomFS>' % romfs)
+        if marker and not (romfs / marker).is_file():
+            raise Failure('%s is not this game\'s RomFS (missing %s)' % (romfs, marker))
+        say('resource backend: directory - the App carries the game data (%s)' % romfs)
 
     # Shader libraries
     profile_dir = copy_profile_tables(work, g)
@@ -598,7 +671,7 @@ def main(argv=None):
     bundle = bundle_id(g)
 
     if args.target == 'mac':
-        out = build_mac(args, work, patched, mac_library, nacp, icon, version, bundle)
+        out = build_mac(args, work, patched, mac_library, nacp, icon, version, bundle, romfs)
     else:
         out = build_ios(args, work, patched, ios_library, nacp, icon, version, bundle)
     if not out.exists():

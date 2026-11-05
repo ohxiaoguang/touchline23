@@ -71,6 +71,12 @@ iOS 另需 XcodeGen。[构建指南](docs/fifa23/build.md)列出了实际验证�
 输出为 `Release/Touchline23.app` 和 `Release/Touchline23.ipa`，这两个入口构建的是外置资源版本。
 默认工作目录是被 Git 忽略的 `build/work`；游戏原始输入、密钥和提取／分析工作放在游戏所在磁盘上。
 
+macOS App 默认不做签名：ad-hoc 签名需显式加 `--sign`（或用 `--sign "<身份>"` 指定签名身份），
+它会把 `Info.plist` 与全部资源纳入封印。未签名的构建可正常运行。Game Mode 由 App 的
+`Info.plist`（`LSApplicationCategoryType` 与 `LSSupportsGameMode`）申请，与签名无关。
+Directory 版 App 内置完整 RomFS（本作约 14.8 GB），macOS 首次打开时会校验整个 App，
+首次启动明显慢于之后各次。
+
 重新构建宿主或启动器时，可复用已有成果：
 
 | 已准备的输入 | 参数 |

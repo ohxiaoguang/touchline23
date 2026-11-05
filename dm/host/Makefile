@@ -57,7 +57,7 @@ endif
 .PHONY: FORCE
 FORCE:
 $(HOST): $(SRC) $(GFX) ../third_party/stb_vorbis/stb_vorbis.c dm.h hle.h dm_input.h pad_slots.h hle_haptics.h haptics_apple.h front.h $(GFX_H) $(wildcard ../resource/*.[ch]) $(GAME_H) $(GAME_STAMP) $(VPX_LIB)
-	clang $(CFLAGS) -I../gfx/nvn/include -I../third_party/vulkan-headers/include -I$(dir $(GAME_H)) -I$(GAME_DIR) -I$(VPX) -I../third_party/stb_vorbis -fobjc-arc -o $@ $(SRC) $(GFX) $(VPX_LIB) -framework Cocoa -framework QuartzCore -framework Metal -framework GameController -framework CoreHaptics -framework AudioToolbox -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework ImageIO -framework UniformTypeIdentifiers -lz
+	clang $(CFLAGS) -I../gfx/nvn/include -I../third_party/vulkan-headers/include -I$(dir $(GAME_H)) -I$(GAME_DIR) -I$(VPX) -I../third_party/stb_vorbis -fobjc-arc -o $@ $(SRC) $(GFX) $(VPX_LIB) -framework Cocoa -framework QuartzCore -framework Metal -framework MetalFX -framework GameController -framework CoreHaptics -framework AudioToolbox -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework ImageIO -framework UniformTypeIdentifiers -lz
 clean:   # the host and everything make generates for it ($(GEN)/: the profile headers, the game stamp and the libvpx build; dmhost_* and *.dSYM beside them, as in .gitignore)
 	rm -rf $(GEN) $(HOST) dmhost_* *.dSYM
 .PHONY: clean

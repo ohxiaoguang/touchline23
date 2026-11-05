@@ -173,7 +173,7 @@ private struct LauncherView: View {
                         Text(l(problem)).font(.footnote).foregroundStyle(Color.red)
                     }
                 }
-                ForEach(m.settings) { SettingRow(s: $0, m: m) }
+                SettingsList(m: m)
                 Section {
                     HStack {
                         Text(l("Memory available"))
